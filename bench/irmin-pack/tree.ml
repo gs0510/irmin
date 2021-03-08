@@ -30,6 +30,7 @@ type config = {
   freeze_commit : int;
   commit_data_file : string;
   results_dir : string;
+  json : bool;
 }
 
 module type STORE = sig
@@ -375,7 +376,7 @@ module Bench_suite (Store : STORE) = struct
     let* result =
       Trees.add_large_trees config.width config.nlarge_trees
       |> add_commits ~message:"Playing large mode" repo config.ncommits
-           on_commit
+          on_commit
       |> Benchmark.run config
     in
     let+ () = Store.Repo.close repo in
@@ -435,17 +436,18 @@ module Bench_suite (Store : STORE) = struct
     close_out json_channel;
 
     fun ppf ->
-      Format.fprintf ppf
-        "Tezos_log mode on inode config %a, %a. @\n\
-         %t@\n\
-         Results: @\n\
-         %a@\n\
-         Stats saved to %s@\n\
-         %a"
-        pp_inode_config config.inode_config pp_store_type config.store_type
-        repo_pp Trees_trace.pp_stats
-        (false, config.flatten, config.inode_config, config.store_type)
-        json_path Benchmark.pp_results result
+      if not config.json then
+        Format.fprintf ppf
+          "Tezos_log mode on inode config %a, %a. @\n\
+           %t@\n\
+           Results: @\n\
+           %a@\n\
+           Stats saved to %s@\n\
+           %a"
+          pp_inode_config config.inode_config pp_store_type config.store_type
+          repo_pp Trees_trace.pp_stats
+          (false, config.flatten, config.inode_config, config.store_type)
+          json_path Benchmark.pp_results result
 end
 
 module Make_store_layered (Conf : sig
@@ -637,7 +639,7 @@ let get_suite suite_filter =
 
 let main ncommits ncommits_trace suite_filter inode_config store_type
     freeze_commit flatten depth width nchain_trees nlarge_trees commit_data_file
-    results_dir =
+    results_dir json =
   let default = match suite_filter with `Quick -> 10000 | _ -> 13315 in
   let ncommits_trace = Option.value ~default ncommits_trace in
   let config =
@@ -655,6 +657,7 @@ let main ncommits ncommits_trace suite_filter inode_config store_type
       store_type;
       freeze_commit;
       results_dir;
+      json;
     }
   in
   Printexc.record_backtrace true;
@@ -663,7 +666,8 @@ let main ncommits ncommits_trace suite_filter inode_config store_type
   let suite = get_suite suite_filter in
   let run_benchmarks () = Lwt_list.map_s (fun b -> b.run config) suite in
   let results = Lwt_main.run (run_benchmarks ()) in
-  Fmt.pr "%a@." Fmt.(list ~sep:(any "@\n@\n") (fun ppf f -> f ppf)) results
+  if not json then
+    Fmt.pr "%a@." Fmt.(list ~sep:(any "@\n@\n") (fun ppf f -> f ppf)) results
 
 open Cmdliner
 
@@ -761,6 +765,13 @@ let results_dir =
   in
   Arg.(value @@ opt string default_results_dir doc)
 
+let json =
+  let doc =
+    Arg.info ~doc:"Generate json output for continuous benchmarks."
+      [ "j"; "json" ]
+  in
+  Arg.(value @@ flag doc)
+
 let main_term =
   Term.(
     const main
@@ -776,7 +787,8 @@ let main_term =
     $ nchain_trees
     $ nlarge_trees
     $ commit_data_file
-    $ results_dir)
+    $ results_dir
+    $ json)
 
 let () =
   let info = Term.info "Benchmarks for tree operations" in
